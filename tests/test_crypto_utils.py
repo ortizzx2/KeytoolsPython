@@ -5,6 +5,7 @@ Cómo ejecutarlas (desde la carpeta del proyecto):
     python3 -m unittest discover tests -v
 """
 
+import hashlib
 import os
 import sys
 import unittest
@@ -87,6 +88,57 @@ class PruebasCrypto(unittest.TestCase):
     def test_csr_sin_datos_da_error(self):
         with self.assertRaises(ValueError):
             crypto_utils.build_csr(self.key, {})
+
+
+class PruebasCertificadoAutofirmado(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.key = crypto_utils.generate_keypair()
+        cls.cert_pem = crypto_utils.build_self_signed_cert(cls.key, DNAME, days=30)
+        cls.cert = x509.load_pem_x509_certificate(cls.cert_pem)
+
+    def test_es_pem_y_bytes(self):
+        self.assertIsInstance(self.cert_pem, bytes)
+        self.assertTrue(self.cert_pem.startswith(b"-----BEGIN CERTIFICATE-----"))
+
+    def test_titular_y_emisor_son_el_mismo(self):
+        self.assertEqual(self.cert.subject, self.cert.issuer)
+        self.assertEqual(self.cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value, "Ana Perez")
+
+    def test_firma_valida_con_su_propia_clave(self):
+        # Lanza excepción si la firma no se corresponde con la clave del propio certificado.
+        self.cert.verify_directly_issued_by(self.cert)
+
+    def test_lleva_la_clave_publica_correcta(self):
+        public_in_cert = self.cert.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode()
+        self.assertEqual(public_in_cert, crypto_utils.public_key_to_pem(self.key))
+
+    def test_validez_en_dias(self):
+        validity = self.cert.not_valid_after_utc - self.cert.not_valid_before_utc
+        self.assertEqual(validity.days, 30)
+
+    def test_dias_no_positivos_dan_error(self):
+        with self.assertRaises(ValueError):
+            crypto_utils.build_self_signed_cert(self.key, DNAME, days=0)
+
+    def test_dn_vacio_da_error(self):
+        with self.assertRaises(ValueError):
+            crypto_utils.build_self_signed_cert(self.key, {})
+
+    def test_huella_formato_sha256(self):
+        fingerprint = crypto_utils.certificate_fingerprint(self.cert_pem)
+        # 32 bytes = 32 pares hexadecimales separados por ':' -> 32*2 + 31 = 95 caracteres.
+        self.assertEqual(len(fingerprint), 95)
+        self.assertEqual(fingerprint, fingerprint.upper())
+        self.assertEqual(fingerprint.count(":"), 31)
+
+    def test_huella_coincide_con_sha256_del_der(self):
+        der = self.cert.public_bytes(serialization.Encoding.DER)
+        expected = hashlib.sha256(der).hexdigest().upper()
+        self.assertEqual(crypto_utils.certificate_fingerprint(self.cert_pem).replace(":", ""), expected)
 
 
 if __name__ == "__main__":
