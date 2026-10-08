@@ -7,6 +7,8 @@ PEM es un formato de texto: los bytes binarios de la clave se codifican en
 Base64 y se envuelven entre líneas "-----BEGIN ...-----" y "-----END ...-----".
 """
 
+import datetime
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -94,6 +96,16 @@ def build_csr(key: RSAPrivateKey, dname: dict) -> bytes:
     El CSR contiene la clave pública y el DN, y se firma con la clave privada
     para demostrar que quien lo solicita la posee. La privada nunca se incluye.
     """
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(_build_name(dname))
+        .sign(key, hashes.SHA256())
+    )
+    return csr.public_bytes(serialization.Encoding.PEM)
+
+
+def _build_name(dname: dict) -> x509.Name:
+    """Convierte el diccionario del DN en un x509.Name, omitiendo campos vacíos."""
     attributes = []
     for field, oid in _DNAME_OIDS:
         value = dname.get(field, "")
@@ -101,11 +113,43 @@ def build_csr(key: RSAPrivateKey, dname: dict) -> bytes:
             attributes.append(x509.NameAttribute(oid, value))
 
     if not attributes:
-        raise ValueError("El DN no tiene ningún dato: no se puede crear el CSR.")
+        raise ValueError("El DN no tiene ningún dato: no se puede crear el certificado.")
+    return x509.Name(attributes)
 
-    csr = (
-        x509.CertificateSigningRequestBuilder()
-        .subject_name(x509.Name(attributes))
+
+def build_self_signed_cert(key: RSAPrivateKey, dname: dict, days: int = 365) -> bytes:
+    """Crea un certificado autofirmado en PEM, válido durante `days` días.
+
+    Autofirmado significa que el emisor y el titular son la misma entidad: se
+    firma con la propia clave privada. Es lo que genera `keytool -genkeypair`
+    junto al par de claves. Ninguna CA lo avala, así que no ofrece confianza
+    de terceros por defecto.
+    """
+    if days <= 0:
+        raise ValueError("Los días de validez deben ser un número positivo.")
+
+    name = _build_name(dname)  # titular y emisor son el mismo
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=days))
         .sign(key, hashes.SHA256())
     )
-    return csr.public_bytes(serialization.Encoding.PEM)
+    return cert.public_bytes(serialization.Encoding.PEM)
+
+
+def certificate_fingerprint(cert_pem: bytes) -> str:
+    """Huella SHA-256 del certificado, como la muestra `keytool -list`.
+
+    Devuelve pares hexadecimales en mayúsculas separados por ':'
+    (por ejemplo 'A1:B2:...'). Sirve para comprobar a ojo que dos
+    certificados son el mismo.
+    """
+    cert = x509.load_pem_x509_certificate(cert_pem)
+    return cert.fingerprint(hashes.SHA256()).hex(":").upper()
