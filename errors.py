@@ -27,3 +27,7 @@ class KeystoreNotFoundError(KeytoolError):
 
 class KeystoreCorruptedError(KeytoolError):
     """El archivo del almacén existe pero no se puede leer (dañado)."""
+
+
+class InvalidInputError(KeytoolError):
+    """El usuario escribió algo no válido (contraseña corta, país mal escrito...)."""
