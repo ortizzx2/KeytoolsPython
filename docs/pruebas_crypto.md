@@ -10,7 +10,10 @@ python3 -m unittest discover tests -v
 ```
 
 (En Windows: `py -m unittest discover tests -v`.) Resultado de la última
-ejecución: **11 pruebas, todas correctas**.
+ejecución: **21 pruebas en total, todas correctas**: las 12 de este documento
+y las 9 de la ampliación (ver `docs/ampliacion_certificado.md`).
+
+Requisito: `cryptography` 42 o superior (los tests usan `not_valid_after_utc`).
 
 ## 1. Pruebas unitarias (`tests/test_crypto_utils.py`)
 
@@ -27,6 +30,7 @@ ejecución: **11 pruebas, todas correctas**.
 | C-09 | `build_csr` | Contenido del CSR | Contiene la clave pública y **nunca** la privada | OK |
 | C-10 | `build_csr` | DN con campos vacíos o ausentes | Se omiten sin error | OK |
 | C-11 | `build_csr` | DN completamente vacío | Lanza `ValueError` | OK |
+| C-12 | `private_key_from_pem` | Clave guardada sin cifrar (almacén manipulado) | Lanza `KeystoreCorruptedError`, sin traza | OK |
 
 ## 2. Pruebas de integración con la CLI
 

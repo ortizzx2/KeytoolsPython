@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.x509.oid import NameOID
 
-from errors import WrongPasswordError
+from errors import KeystoreCorruptedError, WrongPasswordError
 
 # Tamaño de clave que pide el enunciado.
 KEY_SIZE = 2048
@@ -63,7 +63,8 @@ def private_key_from_pem(pem: str, password: str) -> RSAPrivateKey:
     """Carga una clave privada desde PEM cifrado.
 
     Lanza WrongPasswordError si la contraseña no es correcta (o si el PEM
-    está dañado, porque la librería no distingue ambos casos).
+    está dañado, porque la librería no distingue ambos casos) y
+    KeystoreCorruptedError si la clave guardada no está cifrada.
     """
     try:
         return serialization.load_pem_private_key(
@@ -72,6 +73,9 @@ def private_key_from_pem(pem: str, password: str) -> RSAPrivateKey:
         )
     except ValueError:
         raise WrongPasswordError("Contraseña de la clave incorrecta.") from None
+    except TypeError:
+        # La librería lo lanza si le damos contraseña y la clave no está cifrada.
+        raise KeystoreCorruptedError("La clave guardada no está cifrada: el almacén está dañado.") from None
 
 
 def public_key_to_pem(key: RSAPrivateKey) -> str:

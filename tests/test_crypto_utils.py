@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
 
 import crypto_utils
-from errors import WrongPasswordError
+from errors import KeystoreCorruptedError, WrongPasswordError
 
 PASSWORD = "secreto123"
 DNAME = {"CN": "Ana Perez", "OU": "IT", "O": "Empresa", "L": "Madrid", "ST": "Madrid", "C": "ES"}
@@ -56,6 +56,15 @@ class PruebasCrypto(unittest.TestCase):
         pem = crypto_utils.private_key_to_pem(self.key, PASSWORD)
         with self.assertRaises(WrongPasswordError):
             crypto_utils.private_key_from_pem(pem, "otra-contrasena")
+
+    def test_clave_guardada_sin_cifrar_da_error_controlado(self):
+        unencrypted = self.key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+        with self.assertRaises(KeystoreCorruptedError):
+            crypto_utils.private_key_from_pem(unencrypted, PASSWORD)
 
     def test_csr_es_pem_y_bytes(self):
         csr_pem = crypto_utils.build_csr(self.key, DNAME)
