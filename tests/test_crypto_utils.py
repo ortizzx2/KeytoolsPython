@@ -1,7 +1,7 @@
 """
 Pruebas del módulo crypto_utils.py (Parte B).
 
-Autor: Edgar Ortiz
+Autor: EOM
 
 Cómo ejecutarlas (desde la carpeta del proyecto):
     python3 -m unittest discover tests -v

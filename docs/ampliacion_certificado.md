@@ -1,6 +1,6 @@
 # Ampliación: certificado autofirmado y huella digital
 
-**Autor:** Edgar Ortiz
+**Autor:** EOM
 
 Funciones añadidas a `crypto_utils.py` (Parte B):
 
