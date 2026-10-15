@@ -1,5 +1,7 @@
 """Operaciones criptográficas del simulador (Parte B).
 
+Autor: Edgar Ortiz
+
 Todas las claves y solicitudes se intercambian con el resto del programa como
 texto PEM, para poder guardarlas directamente en keystore.json.
 

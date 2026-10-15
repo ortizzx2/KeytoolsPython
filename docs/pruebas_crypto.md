@@ -1,5 +1,7 @@
 # Matriz de pruebas: módulo criptográfico (`crypto_utils.py`)
 
+**Autor:** Edgar Ortiz
+
 Pruebas de la Parte B: generación de claves RSA, serialización PEM y creación
 de la solicitud de certificado (CSR).
 
