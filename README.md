@@ -4,8 +4,8 @@ Aplicación de línea de comandos (CLI) que simula las funciones básicas de la 
 
 ## Integrantes
 
-- Persona A: _(nombre completo)_ — CLI, persistencia del almacén, errores de almacén/alias
-- Persona B: _(nombre completo)_ — criptografía (RSA, DN, CSR)
+- Persona A: Isaac Trujillo Bombín — CLI, persistencia del almacén, errores de almacén/alias
+- Persona B: Edgar Ortiz Méndez — criptografía (RSA, DN, CSR)
 
 ## Instalación
 
@@ -21,7 +21,8 @@ pip install cryptography
 |---|---|
 | `mykeytool.py` | Programa principal: lee los comandos y habla con el usuario |
 | `keystore.py` | Guarda y lee el almacén `keystore.json` (contraseña con hash + sal) |
-| `crypto_utils.py` | Genera claves RSA 2048, el DN y el CSR |
+| `crypto_utils.py` | Genera claves RSA 2048, el DN, el CSR y el certificado autofirmado |
+| `docs/` | Matriz de pruebas criptográficas y documentación de la ampliación |
 | `errors.py` | Errores propios del programa |
 | `tests/` | Pruebas |
 
@@ -67,6 +68,21 @@ Contraseña de la clave del alias:
 Solicitud de certificado guardada en 'ana.csr'.
 ```
 
+### Exportar un certificado autofirmado (`--exportcert`, ampliación)
+
+```
+$ python3 mykeytool.py --exportcert
+Contraseña del almacén:
+Alias: ana
+Contraseña de la clave del alias:
+Certificado autofirmado guardado en 'ana.crt'.
+Huella SHA-256: 68:D7:8D:46:42:8E:FB:A4:...:44:06:11
+```
+
+Más detalles en [`docs/ampliacion_certificado.md`](docs/ampliacion_certificado.md).
+
+`--genkey` también se acepta como nombre alternativo de `--genkeypair`.
+
 ### Usar otro archivo de almacén
 
 ```
@@ -90,11 +106,17 @@ Error: El almacén 'keystore.json' está dañado (no es un JSON válido).
 
 ## Explicación criptográfica
 
-_(Persona B: RSA 2048, cifrado de la clave privada, formato CSR/PEM)_
+- **RSA 2048:** cada alias tiene un par de claves RSA de 2048 bits con exponente público 65537. La pública se puede compartir; la privada solo la tiene el titular y sirve para firmar.
+- **Clave privada cifrada:** se guarda en PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`), cifrada con la contraseña del alias. Sin esa contraseña no se puede usar, aunque alguien copie `keystore.json`.
+- **CSR (PKCS#10):** contiene la clave pública y el DN, firmado con SHA-256 y la clave privada para demostrar que el solicitante la posee. La clave privada nunca va dentro.
+- **PEM:** los datos binarios (DER) codificados en Base64 entre líneas `-----BEGIN ...-----` / `-----END ...-----`, para poder guardarlos como texto.
+- **Certificado autofirmado (ampliación):** certificado X.509 donde emisor y titular son el mismo, firmado con la propia clave; se identifica por su huella SHA-256.
+
+Detalle de las pruebas criptográficas en [`docs/pruebas_crypto.md`](docs/pruebas_crypto.md).
 
 ## Pruebas
 
-Pruebas automáticas del almacén:
+Pruebas automáticas (almacén y criptografía, 31 en total):
 
 ```
 python3 -m unittest discover tests -v
@@ -102,14 +124,22 @@ python3 -m unittest discover tests -v
 
 ### Matriz de pruebas
 
-_(Ambos: completar con las pruebas manuales ejecutadas)_
+Pruebas manuales ejecutadas con el programa completo:
 
 | # | Prueba | Resultado esperado | Resultado |
 |---|---|---|---|
-| 1 | `--help` | Lista comandos | |
-| 2 | `--genkeypair` con almacén nuevo | Crea `keystore.json` | |
-| 3 | `--genkeypair` con alias repetido | Error "el alias ya existe" | |
-| 4 | Contraseña del almacén incorrecta | Error y rechazo | |
-| 5 | Almacén inexistente / dañado | Mensaje claro | |
-| 6 | `--certreq` correcto | Crea `<alias>.csr` | |
-| 7 | `--certreq` con contraseña de alias incorrecta | Error | |
+| 1 | `--help` | Lista comandos | OK |
+| 2 | `--genkeypair` con almacén nuevo | Crea `keystore.json` | OK |
+| 3 | `--genkeypair` con alias repetido | Error "el alias ya existe" | OK |
+| 4 | Contraseña del almacén incorrecta | Error y rechazo | OK |
+| 5 | Almacén inexistente / dañado | Mensaje claro | OK |
+| 6 | `--certreq` correcto | Crea `<alias>.csr` | OK |
+| 7 | `--certreq` con contraseña de alias incorrecta | Error | OK |
+| 8 | `--certreq` con alias inexistente | Error "el alias no existe" | OK |
+| 9 | Validar `ana.csr` con `openssl req -verify` | Firma correcta | OK |
+| 10 | `--genkey` (nombre alternativo) | Igual que `--genkeypair` | OK |
+| 11 | `--exportcert` correcto | Crea `<alias>.crt` y muestra la huella | OK |
+| 12 | Huella de `--exportcert` frente a `openssl x509 -fingerprint -sha256` | Coinciden | OK |
+| 13 | Entrada de alias dañada a mano en `keystore.json` | Error "almacén dañado", sin traza | OK |
+| 14 | Datos no válidos (coma en el DN, CN vacío, contraseña < 6) | Error claro | OK |
+| 15 | Dos comandos a la vez (`--certreq --exportcert`) | argparse lo rechaza | OK |

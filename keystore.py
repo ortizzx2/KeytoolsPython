@@ -168,6 +168,17 @@ def _check_structure(data, path: str) -> None:
     except ValueError:
         raise KeystoreCorruptedError(error_message)
 
+    # Cada alias debe tener sus tres textos, y el DN la forma "CN=..., C=..".
+    for entry in data["keys"].values():
+        if not isinstance(entry, dict):
+            raise KeystoreCorruptedError(error_message)
+        for field in ("private_key", "public_key", "dname"):
+            if not isinstance(entry.get(field), str):
+                raise KeystoreCorruptedError(error_message)
+        for part in entry["dname"].split(", "):
+            if "=" not in part:
+                raise KeystoreCorruptedError(error_message)
+
 
 def save(path: str, data: dict) -> None:
     """Escribe el keystore en disco como JSON.

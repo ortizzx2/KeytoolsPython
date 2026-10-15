@@ -77,6 +77,14 @@ class PruebasKeystore(unittest.TestCase):
         with self.assertRaises(KeystoreCorruptedError):
             keystore.load(self.path)
 
+    def test_almacen_con_alias_danado(self):
+        # El JSON y la contraseña están bien, pero la entrada del alias no.
+        data = keystore.create("secreto123")
+        data["keys"]["ana"] = {"private_key": "x"}  # faltan public_key y dname
+        keystore.save(self.path, data)
+        with self.assertRaises(KeystoreCorruptedError):
+            keystore.load(self.path)
+
 
 if __name__ == "__main__":
     unittest.main()

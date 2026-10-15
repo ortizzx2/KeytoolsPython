@@ -7,6 +7,7 @@ Uso:
     python3 mykeytool.py --help
     python3 mykeytool.py --genkeypair
     python3 mykeytool.py --certreq
+    python3 mykeytool.py --exportcert
 
 Este archivo SOLO se ocupa de hablar con el usuario (preguntar datos y mostrar
 mensajes). El trabajo de verdad lo hacen otros módulos:
@@ -182,8 +183,12 @@ def command_genkeypair(keystore_path):
 # Comando --certreq
 # ---------------------------------------------------------------------------
 
-def command_certreq(keystore_path):
-    """Crea un archivo .csr (solicitud de certificado) a partir de un alias."""
+def unlock_alias(keystore_path):
+    """Pasos comunes de --certreq y --exportcert.
+
+    Carga el almacén, comprueba su contraseña, busca el alias y descifra su
+    clave privada. Devuelve (alias, entrada del almacén, clave privada).
+    """
 
     # Paso 1: cargar el almacén. Si no existe o está dañado, salta un error.
     data = keystore.load(keystore_path)
@@ -201,6 +206,14 @@ def command_certreq(keystore_path):
     # Si la contraseña está mal, crypto_utils lanza WrongPasswordError.
     key_password = ask_password("Contraseña de la clave del alias: ")
     key = crypto_utils.private_key_from_pem(entry["private_key"], key_password)
+    return alias, entry, key
+
+
+def command_certreq(keystore_path):
+    """Crea un archivo .csr (solicitud de certificado) a partir de un alias."""
+
+    # Pasos 1-4: almacén, contraseña, alias y clave privada.
+    alias, entry, key = unlock_alias(keystore_path)
 
     # Paso 5: construir el CSR en formato PEM (lo hace la Parte B).
     csr_pem = crypto_utils.build_csr(key, text_to_dname(entry["dname"]))
@@ -211,6 +224,28 @@ def command_certreq(keystore_path):
         file.write(csr_pem)
 
     print("Solicitud de certificado guardada en '%s'." % file_name)
+
+
+# ---------------------------------------------------------------------------
+# Comando --exportcert (ampliación)
+# ---------------------------------------------------------------------------
+
+def command_exportcert(keystore_path):
+    """Crea un certificado autofirmado <alias>.crt y muestra su huella SHA-256."""
+
+    # Pasos 1-4: almacén, contraseña, alias y clave privada.
+    alias, entry, key = unlock_alias(keystore_path)
+
+    # Paso 5: certificado autofirmado en PEM, válido 365 días (lo hace la Parte B).
+    cert_pem = crypto_utils.build_self_signed_cert(key, text_to_dname(entry["dname"]))
+
+    # Paso 6: escribir el archivo <alias>.crt.
+    file_name = alias + ".crt"
+    with open(file_name, "wb") as file:
+        file.write(cert_pem)
+
+    print("Certificado autofirmado guardado en '%s'." % file_name)
+    print("Huella SHA-256: %s" % crypto_utils.certificate_fingerprint(cert_pem))
 
 
 # ---------------------------------------------------------------------------
@@ -226,15 +261,17 @@ def create_parser():
             "Ejemplos:\n"
             "  python3 mykeytool.py --genkeypair\n"
             "  python3 mykeytool.py --certreq\n"
+            "  python3 mykeytool.py --exportcert\n"
             "  python3 mykeytool.py --genkeypair --keystore otro.json"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,  # respeta los saltos de línea del epilog
     )
 
-    # Solo se puede elegir UNA de estas dos acciones a la vez.
+    # Solo se puede elegir UNA de estas acciones a la vez.
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--genkeypair",
+        "--genkey",  # nombre antiguo de keytool, también aceptado
         action="store_true",  # si aparece, vale True; si no, False
         help="Genera un par de claves RSA 2048 y lo guarda en el almacén (pide contraseña, alias y datos del titular).",
     )
@@ -242,6 +279,11 @@ def create_parser():
         "--certreq",
         action="store_true",
         help="Genera un archivo .csr (PEM) para un alias del almacén (pide contraseña del almacén y del alias).",
+    )
+    group.add_argument(
+        "--exportcert",
+        action="store_true",
+        help="Genera un certificado autofirmado <alias>.crt (PEM) y muestra su huella SHA-256.",
     )
 
     parser.add_argument(
@@ -262,15 +304,17 @@ def main():
     args = parser.parse_args()
 
     # Si no se eligió ningún comando, mostramos la ayuda.
-    if not args.genkeypair and not args.certreq:
+    if not args.genkeypair and not args.certreq and not args.exportcert:
         parser.print_help()
         return 0
 
     try:
         if args.genkeypair:
             command_genkeypair(args.keystore)
-        else:
+        elif args.certreq:
             command_certreq(args.keystore)
+        else:
+            command_exportcert(args.keystore)
     except KeytoolError as error:
         # Error esperado (contraseña mal, alias repetido, almacén inexistente...).
         print("Error: %s" % error, file=sys.stderr)
