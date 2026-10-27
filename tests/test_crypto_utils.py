@@ -7,6 +7,7 @@ Cómo ejecutarlas (desde la carpeta del proyecto):
 
 import hashlib
 import os
+import struct
 import sys
 import unittest
 
@@ -148,6 +149,55 @@ class PruebasCertificadoAutofirmado(unittest.TestCase):
         der = self.cert.public_bytes(serialization.Encoding.DER)
         expected = hashlib.sha256(der).hexdigest().upper()
         self.assertEqual(crypto_utils.certificate_fingerprint(self.cert_pem).replace(":", ""), expected)
+
+
+class PruebasJKS(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.key = crypto_utils.generate_keypair()
+        cls.cert_pem = crypto_utils.build_self_signed_cert(cls.key, DNAME)
+        cls.jks = crypto_utils.build_jks("Ana", cls.key, cls.cert_pem, PASSWORD)
+
+    def test_cabecera_y_una_entrada(self):
+        magic, version, count = struct.unpack(">III", self.jks[:12])
+        self.assertEqual((magic, version, count), (0xFEEDFEED, 2, 1))
+
+    def test_alias_en_minusculas(self):
+        alias_length = struct.unpack(">H", self.jks[16:18])[0]
+        self.assertEqual(self.jks[18:18 + alias_length], b"ana")
+
+    def test_firma_de_integridad(self):
+        body, signature = self.jks[:-20], self.jks[-20:]
+        expected = hashlib.sha1(PASSWORD.encode("utf-16-be") + b"Mighty Aphrodite" + body).digest()
+        self.assertEqual(signature, expected)
+
+    def test_contiene_el_certificado(self):
+        cert_der = x509.load_pem_x509_certificate(self.cert_pem).public_bytes(serialization.Encoding.DER)
+        self.assertIn(cert_der, self.jks)
+
+    def test_la_clave_privada_no_va_en_claro(self):
+        pkcs8 = self.key.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+        self.assertNotIn(pkcs8, self.jks)
+
+    def test_la_clave_se_descifra_con_la_contrasena(self):
+        pkcs8 = self.key.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+        blob = crypto_utils._jks_protect_key(pkcs8, PASSWORD)
+        # Al final del blob van: sal (20) + datos + SHA-1 de control (20).
+        payload = blob[-(20 + len(pkcs8) + 20):]
+        salt, encrypted, check = payload[:20], payload[20:-20], payload[-20:]
+        password_bytes = PASSWORD.encode("utf-16-be")
+        keystream, block = b"", salt
+        while len(keystream) < len(encrypted):
+            block = hashlib.sha1(password_bytes + block).digest()
+            keystream += block
+        decrypted = bytes(a ^ b for a, b in zip(encrypted, keystream))
+        self.assertEqual(decrypted, pkcs8)
+        self.assertEqual(check, hashlib.sha1(password_bytes + pkcs8).digest())
 
 
 if __name__ == "__main__":

@@ -8,6 +8,10 @@ Base64 y se envuelven entre líneas "-----BEGIN ...-----" y "-----END ...-----".
 """
 
 import datetime
+import hashlib
+import os
+import struct
+import time
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -146,6 +150,73 @@ def build_self_signed_cert(key: RSAPrivateKey, dname: dict, days: int = 365) -> 
         .sign(key, hashes.SHA256())
     )
     return cert.public_bytes(serialization.Encoding.PEM)
+
+
+def _der_length(length: int) -> bytes:
+    """Longitud en formato DER (1 byte si es < 128; si no, 0x80+nº de bytes y los bytes)."""
+    if length < 0x80:
+        return bytes([length])
+    length_bytes = length.to_bytes((length.bit_length() + 7) // 8, "big")
+    return bytes([0x80 + len(length_bytes)]) + length_bytes
+
+
+def _jks_protect_key(pkcs8_der: bytes, password: str) -> bytes:
+    """Cifra la clave privada como lo hace el JKS de Sun (EncryptedPrivateKeyInfo).
+
+    El algoritmo (OID 1.3.6.1.4.1.42.2.17.1.1) es propio de Sun: genera un flujo
+    de bytes con SHA-1 a partir de la contraseña y una sal, y lo suma por XOR a
+    la clave. Al final añade un SHA-1 de control para detectar contraseñas malas.
+    """
+    password_bytes = password.encode("utf-16-be")
+    salt = os.urandom(20)
+
+    # Flujo de bloques: SHA1(pass+sal), SHA1(pass+bloque anterior), ...
+    keystream = b""
+    block = salt
+    while len(keystream) < len(pkcs8_der):
+        block = hashlib.sha1(password_bytes + block).digest()
+        keystream += block
+
+    encrypted = bytes(a ^ b for a, b in zip(pkcs8_der, keystream))
+    check = hashlib.sha1(password_bytes + pkcs8_der).digest()
+    payload = salt + encrypted + check
+
+    algorithm = b"\x30\x0e\x06\x0a\x2b\x06\x01\x04\x01\x2a\x02\x11\x01\x01\x05\x00"
+    octet_string = b"\x04" + _der_length(len(payload)) + payload
+    body = algorithm + octet_string
+    return b"\x30" + _der_length(len(body)) + body
+
+
+def build_jks(alias: str, key: RSAPrivateKey, cert_pem: bytes, password: str) -> bytes:
+    """Crea un almacén JKS (formato clásico de Java) con un único alias.
+
+    El JKS guarda la clave privada junto a su certificado. `password` se usa
+    como contraseña del almacén y de la clave, igual que hace keytool por
+    defecto. Como keytool, el alias se guarda en minúsculas. Se escribe a mano
+    porque `cryptography` no sabe crear JKS.
+    """
+    pkcs8_der = key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    cert_der = x509.load_pem_x509_certificate(cert_pem).public_bytes(serialization.Encoding.DER)
+    alias_bytes = alias.lower().encode("utf-8")
+    key_blob = _jks_protect_key(pkcs8_der, password)
+
+    # Cabecera: magia 0xFEEDFEED, versión 2, una entrada.
+    data = struct.pack(">III", 0xFEEDFEED, 2, 1)
+    # Entrada: tipo 1 = clave privada, alias, fecha (ms), clave cifrada y cadena de 1 certificado.
+    data += struct.pack(">I", 1)
+    data += struct.pack(">H", len(alias_bytes)) + alias_bytes
+    data += struct.pack(">Q", int(time.time() * 1000))
+    data += struct.pack(">I", len(key_blob)) + key_blob
+    data += struct.pack(">I", 1)
+    data += struct.pack(">H", 5) + b"X.509"
+    data += struct.pack(">I", len(cert_der)) + cert_der
+    # Firma de integridad del almacén con la contraseña.
+    data += hashlib.sha1(password.encode("utf-16-be") + b"Mighty Aphrodite" + data).digest()
+    return data
 
 
 def certificate_fingerprint(cert_pem: bytes) -> str:

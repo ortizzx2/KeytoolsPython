@@ -6,6 +6,7 @@ Programa principal: simula el comando `keytool` de Java.
 Uso:
     python3 mykeytool.py --help
     python3 mykeytool.py --genkeypair
+    python3 mykeytool.py --genkeypair --jks
     python3 mykeytool.py --certreq
     python3 mykeytool.py --exportcert
 
@@ -18,6 +19,7 @@ mensajes). El trabajo de verdad lo hacen otros módulos:
 
 import argparse
 import getpass
+import os
 import sys
 
 import crypto_utils
@@ -145,8 +147,12 @@ def open_or_create_keystore(path):
     return keystore.create(password)
 
 
-def command_genkeypair(keystore_path):
-    """Genera un par de claves RSA 2048 y lo guarda en el almacén."""
+def command_genkeypair(keystore_path, jks_file=None):
+    """Genera un par de claves RSA 2048 y lo guarda en el almacén.
+
+    Si jks_file no es None, además crea un almacén JKS de Java: con el nombre
+    indicado, o <alias>.jks si jks_file es "".
+    """
 
     # Paso 1: abrir (o crear) el almacén y comprobar la contraseña.
     data = open_or_create_keystore(keystore_path)
@@ -155,6 +161,10 @@ def command_genkeypair(keystore_path):
     # Lo hacemos ya, antes de pedir más datos, para no hacer perder tiempo al usuario.
     alias = ask_alias()
     keystore.check_alias_free(data, alias)
+    write_jks = jks_file is not None
+    jks_path = jks_file or alias + ".jks"
+    if write_jks and os.path.exists(jks_path):
+        raise InvalidInputError("El archivo '%s' ya existe, bórralo o usa otro alias." % jks_path)
 
     # Paso 3: pedir los datos del titular (DN).
     dname = ask_dname()
@@ -177,6 +187,14 @@ def command_genkeypair(keystore_path):
     keystore.save(keystore_path, data)
 
     print("Par de claves '%s' generado y guardado en '%s'." % (alias, keystore_path))
+
+    # Paso 8 (opcional, --jks): un JKS necesita certificado, así que se crea uno
+    # autofirmado. Contraseña del JKS y de su clave = la contraseña del alias.
+    if write_jks:
+        cert_pem = crypto_utils.build_self_signed_cert(key, dname)
+        with open(jks_path, "wb") as file:
+            file.write(crypto_utils.build_jks(alias, key, cert_pem, key_password))
+        print("Almacén JKS guardado en '%s' (contraseña = la del alias)." % jks_path)
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +278,8 @@ def create_parser():
         epilog=(
             "Ejemplos:\n"
             "  python3 mykeytool.py --genkeypair\n"
+            "  python3 mykeytool.py --genkeypair --jks\n"
+            "  python3 mykeytool.py --genkeypair --jks edgar.jks\n"
             "  python3 mykeytool.py --certreq\n"
             "  python3 mykeytool.py --exportcert\n"
             "  python3 mykeytool.py --genkeypair --keystore otro.json"
@@ -287,6 +307,14 @@ def create_parser():
     )
 
     parser.add_argument(
+        "--jks",
+        nargs="?",  # el nombre del archivo es opcional
+        const="",  # --jks sin nombre -> "" -> se usa <alias>.jks
+        metavar="ARCHIVO",
+        help="Con --genkeypair: crea también un almacén JKS de Java (con certificado autofirmado). "
+             "Sin nombre se llama <alias>.jks.",
+    )
+    parser.add_argument(
         "--keystore",
         default=DEFAULT_KEYSTORE,
         help="Archivo del almacén (por defecto: %s)." % DEFAULT_KEYSTORE,
@@ -303,6 +331,9 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
+    if args.jks is not None and not args.genkeypair:
+        parser.error("--jks solo se puede usar junto con --genkeypair.")
+
     # Si no se eligió ningún comando, mostramos la ayuda.
     if not args.genkeypair and not args.certreq and not args.exportcert:
         parser.print_help()
@@ -310,7 +341,7 @@ def main():
 
     try:
         if args.genkeypair:
-            command_genkeypair(args.keystore)
+            command_genkeypair(args.keystore, args.jks)
         elif args.certreq:
             command_certreq(args.keystore)
         else:

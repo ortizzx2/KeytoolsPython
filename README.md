@@ -81,6 +81,16 @@ Huella SHA-256: 68:D7:8D:46:42:8E:FB:A4:...:44:06:11
 
 Más detalles en [`docs/ampliacion_certificado.md`](docs/ampliacion_certificado.md).
 
+### Generar también un JKS (`--genkeypair --jks`)
+
+Además del almacén `keystore.json`, crea `<alias>.jks`, un almacén de Java con la clave privada y un certificado autofirmado (365 días). Su contraseña y la de su clave es la contraseña del alias. El alias se guarda en minúsculas, como hace keytool.
+
+```
+python3 mykeytool.py --genkeypair --jks
+python3 mykeytool.py --genkeypair --jks edgar.jks   # con el nombre que tú elijas
+keytool -list -v -keystore ana.jks
+```
+
 `--genkey` también se acepta como nombre alternativo de `--genkeypair`.
 
 ### Usar otro archivo de almacén
@@ -116,7 +126,7 @@ Detalle de las pruebas criptográficas en [`docs/pruebas_crypto.md`](docs/prueba
 
 ## Pruebas
 
-Pruebas automáticas (almacén y criptografía, 31 en total):
+Pruebas automáticas (almacén y criptografía, 37 en total):
 
 ```
 python3 -m unittest discover tests -v
